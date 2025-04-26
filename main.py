@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import base64
 import os
@@ -71,7 +72,7 @@ If a popup, overlay, or modal appears, find and click a button or icon to dismis
 
 1. Go to https://www.airbnb.com/
 2. Click on Search destinations.
-3. Type "Oahu, HI"
+3. Type "{search}" in the search box.
 5. Click the "Add guests" button.
 6. Click the "+" button next to "Adults" three times until it shows 3.
 7. Click the "Search" button.
@@ -81,15 +82,19 @@ If a popup, overlay, or modal appears, find and click a button or icon to dismis
 11. Click the "+" button next to "Beds" twice until it shows 2.
 12. Click the black button at the bottom that starts with "Show" to apply the filters.
 13. Print the URL of the page.
-14. Pause and ask the human: "Adjust the map and type 'ok' to continue.", then wait for their response.
-15. For each listing block, get the following details:
+14. For each listing block, get the following details. Scroll the page to load more listings if needed.
+  - If the bold text does not contain "in {results_in}", skip this listing and continue to the next one.
   - Extract the bold text and save it to "title"
   - Extract the rest of the text and save it to "description"
-  - Find an <a> tag where the href attribute starts with "rooms/" and save it to "url"
-  - Under  the <picture> element, extract the srcset attribute from the source tag and save it to "picture_url" 
+  - Find an <a> tag that links to a room (href starts with "/rooms/") and extract the href attribute, and save  as "url".
+  - Find the first image inside the listing block and extract its src or srcset attribute and save it as "picture_url".
   - Extract the price from text like "$1,234.00 for 5 nights" and save it to "price"
   - Extract the number of beds and save it to "beds"
+  15. After reaching the end of the page, click the next link in the pagination numbers and repeat the previous step. If there are no pagination numbers or no more pages, stop.
 """
+
+# annoyingly, Airbnb shows results that don't match the requested location
+# need to include only results that say "in {location}" in the title
 
 DETAILS = """
 Do these steps for each of the first 3 listings:
@@ -153,7 +158,10 @@ def write_screenshot(data: str, filename: str):
     print(f"wrote screenshot {fn}")
 
 
-async def main(task: str = TASK_AIRBNB):
+async def main(location: str):
+    location_parts = location.split(", ")
+    city = location_parts[0]
+    task = TASK_AIRBNB.format(search=location, results_in=city)
     ts = datetime.now().strftime("%H%M")
     # don't know how to get this into the hooks
     global OUTPUT_PATH
@@ -220,4 +228,8 @@ history.model_actions()     # All actions with their parameters
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    # Hauula, Oahu, HI
+    parser.add_argument("location", type=str, help="location to search")
+    args = parser.parse_args()
+    asyncio.run(main(args.location))
