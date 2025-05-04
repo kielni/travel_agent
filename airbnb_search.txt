@@ -1,0 +1,23 @@
+Task: Find an Airbnb rental in Oahu for 3 adults with at least 2 bedrooms and at least 2 beds.
+
+1. Go to https://www.airbnb.com/
+2. Click on Search destinations.
+3. Type "{search}" in the search box.
+5. Click the "Add guests" button.
+6. Click the "+" button next to "Adults" three times until it shows 3.
+7. Click the "Search" button.
+8. Click the "Filters" button.
+9. Inside the open modal, scroll down until the "Bedrooms" section is visible.
+10. Click the "+" button next to "Bedrooms" twice until it shows 2.
+11. Click the "+" button next to "Beds" twice until it shows 2.
+12. Click the black button at the bottom that starts with "Show" to apply the filters.
+13. Print the URL of the page.
+14. For each listing block, get the following details. Scroll the page to load more listings if needed.
+  - If the bold text does not contain "in {results_in}", skip this listing and continue to the next one.
+  - Extract the bold text and save it to "title"
+  - Extract the rest of the text and save it to "description"
+  - Find an <a> tag that links to a room (href starts with "/rooms/") and extract the href attribute, and save  as "url".
+  - Find the first image inside the listing block and extract its src or srcset attribute and save it as "picture_url".
+  - Extract the price from text like "$1,234.00 for 5 nights" and save it to "price"
+  - Extract the number of beds and save it to "beds"
+  15. After reaching the end of the page, click the next link in the pagination numbers and repeat the previous step. If there are no pagination numbers or no more pages, stop.

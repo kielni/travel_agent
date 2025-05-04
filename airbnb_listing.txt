@@ -1,0 +1,22 @@
+Collect information for an Airbnb listing page.
+
+Go to {start_url}.
+Click the "Filters" button.
+Use the scrollbar in the open modal to scroll down until the "Bedrooms" section is visible.
+Click the "+" button next to "Bedrooms" twice until it shows 2.
+Click the "+" button next to "Beds" twice until it shows 2.
+Click the black button at the bottom to apply the filters.
+Print the URL of the page.
+A listing consists of a picture, bold title text, description text, and a price.
+Consider only listings where the bold text contains "in {results_in}". If it doesn't, skip the listing and continue to the next one.
+Use the scrollbar to scroll down to the end of the page to find all listings on the page.
+For each listing, extract the following details:
+  - If the bold text does not contain "in {results_in}", skip this listing and continue to the next one.
+  - Extract the bold text and save it to "title"
+  - Extract the rest of the text and save it to "description"
+  - Find an <a> tag that links to a room (href starts with "/rooms/"). Extract the href attribute, and save  as "url".
+  - Find the first image inside the listing block and extract its src or srcset attribute and save it as "picture_url".
+  - Extract the price from text like "$1,234.00 for 5 nights" and save it to "price"
+  - Extract the number of beds and save it to "beds"
+After reaching the end of the page, use the pagination number links to go to the next page.
+Repeat extracting the listings until there are no more pages, or no listings on the page matched "in {results_in}".
