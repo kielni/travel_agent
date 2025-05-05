@@ -116,7 +116,6 @@ def setup_booking_task(
     with open("booking.txt") as f:
         task_text = f.read()
     # date format Sat Jul 26 - Sun Jul 27
-    date_range = f"{start_date.strftime('%a %b %d')} - {end_date.strftime('%a %b %d')}"
     start_month = start_date.strftime("%B %Y")
     next_month = (start_date + relativedelta(months=1)).strftime("%B %Y")
     task = task_text.format(
@@ -125,6 +124,8 @@ def setup_booking_task(
         next_month=next_month,
         start_date=start_date,
         end_date=end_date,
+        start_yymmdd=start_date.strftime("%Y-%m-%d"),
+        end_yymmdd=end_date.strftime("%Y-%m-%d"),
     )
     return task, BookingListings
 

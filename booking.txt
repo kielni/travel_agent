@@ -2,19 +2,20 @@ Navigate to https://www.booking.com.
 Click the "Where are you going?" field.
 Type “{location}” and wait for dropdown to populate.
 Click {location} and wait for dropdown to close.
-Click the Check-in date field. Click the > button until the date picker shows {start_month} and {next_month}.
-Click the calendar to select {start_date} and {end_date}.
-Click "2 adults · 0 children · 1 room".
-Click the "+" button next to Adults one time until it shows 3.
-Click the "Done" button in the popup and wait a second for page to settle.
 Click the blue "Search" button. This should be a button tag with type="submit" in the DOM.
 Click the "Close map" button in the top right corner of the map.
-On the left sidebar, click the checkbox next to "Only show available properties".
-On the left sidebar, scroll down until "Non-smoking rooms" is visible and click it.
-On the left sidebar, scroll down until "Free Wifi" is visible and click it.
-On the left sidebar, scroll down until "Distance from" is visible, then click "Less than 2 miles".
-Click "Sort by: Top Picks for Groups".
-Click "Distance from landmark".
+Update the URL with these changes:
+  - remove URL fragment: `#map_opened`
+  - remove parameter map
+  - `ss`: Change from full address to just `{location}`
+  -  `ssne`: Add and set to `{location}`
+  - `ssne_untouched`: Add and set to `{location}`
+   - `checkin`:  {start_yymmdd}
+   - `checkout`: {end_yymmdd}
+   - `group_adults`: Change from `2` to `3`
+   - `nflt`: Add or update with filters: `hotelfacility=107;hotelfacility=16` (URL-encoded)
+   - `order`: Add or update to `distance_from_search`
+
 For each listing block, extract the following details:
   - Extract big blue text and save it to "title"
   - Extract link url starting with https://www.booking.com/hotel/ under aria-label="Property" element and save it to "url"
