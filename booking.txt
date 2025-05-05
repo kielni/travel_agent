@@ -1,45 +1,27 @@
-Navigate to https://booking.com/.
+Navigate to https://www.booking.com.
 Click the "Where are you going?" field.
-Type "oahu".
-Click "O'ahu" in the drop down.
-Use the date picker to select dates May 31 through June 8.
-Click the field containing a person icon and text like "3 adults 0 children 1 room".
-Set the Adults field value to 3, then click Done.
-Click "Search".
-Click "Show on map".
-Drag, scroll and zoom the map so that it excludes Honolulu and includes the east coast of Oahu, from Punaluu to Kailua.
-In the left sidebar, click the checkbox next to Parking.
-Repeat the "get details" task for each big blue link in the middle column.
-Use the scrollbar on the right side of the middle column to display more results.
-Stop after repeating the "get details" task 5 times.
-
-"get details" task:
-
-Save the big blue link text as the output key "title".
-Save the text to the right of the photo below the blue link text as the output key "card".
-Save the text formatted as currency starting with $ as the output key "price". Ignore any text in red or formatted with strikethrough.
-Click the big blue link.
-Click the largest image, wait for the page to load, and take a screenshot.
-Save the screenshot with a unique name, and save the  filename in the output key "photos".
-Click the Close link in the top right of the modal dialog.
-Scroll down the page until Property highlights section is visible.
-Save the screenshot with a unique name, and save the result save the filename in the output key "description".
-Scroll down until a table with bed icons and people icons is visible, and take a screenshot.
-Save the screenshot with a unique name, and save the result save the filename in the output key "beds".
-Get the number of "single" or "twin", "full", "queen" and "king" beds. Do not include "sofa" beds.
-Save the bed information in the output key "bed_count".
-Close the browser tab and return to the search results page.
-Use output to generate JSON in this format and save to results.json
-{
-  "title": "title",
-  "card": "card",
-  "price": "price",
-  "photos": "photos_filename.png",
-  "description": "description",
-  "beds": "beds_filename.png",
-  "bed_count": {
-      "twin": 0,
-      "full": 1,
-      "queen": 1,
-      "king": 0
-}
+Type “{location}” and wait for dropdown to populate.
+Click {location} and wait for dropdown to close.
+Click the Check-in date field. Click the > button until the date picker shows {start_month} and {next_month}.
+Click the calendar to select {start_date} and {end_date}.
+Click "2 adults · 0 children · 1 room".
+Click the "+" button next to Adults one time until it shows 3.
+Click the "Done" button in the popup and wait a second for page to settle.
+Click the blue "Search" button. This should be a button tag with type="submit" in the DOM.
+Click the "Close map" button in the top right corner of the map.
+On the left sidebar, click the checkbox next to "Only show available properties".
+On the left sidebar, scroll down until "Non-smoking rooms" is visible and click it.
+On the left sidebar, scroll down until "Free Wifi" is visible and click it.
+On the left sidebar, scroll down until "Distance from" is visible, then click "Less than 2 miles".
+Click "Sort by: Top Picks for Groups".
+Click "Distance from landmark".
+For each listing block, extract the following details:
+  - Extract big blue text and save it to "title"
+  - Extract link url starting with https://www.booking.com/hotel/ under aria-label="Property" element and save it to "url"
+  - Extract number from text like "0.4 miles from " and save it to "distance"
+  - Find details on beds, such as "2 beds (1 twin, 1 queen)" or "2 queen beds" or "2 beds (1 king, 1 sofa bed)" and extract number and type of beds.
+  - For king, queen, or twin beds, save the number to "bed_count" and bed type to "bed_type"
+  - For full, double, or sofa beds, save the number to "excluded_bed_count" and bed type to "excluded_bed_type"
+  - Extract the rating text in blue box, like 8.7, and save it to "rating"
+  - Extract the price, like $123, and save it to "price"
+Scroll the page to load more listings if needed.

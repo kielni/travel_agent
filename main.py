@@ -1,10 +1,14 @@
 import argparse
 import asyncio
 import base64
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, date, timedelta
+from typing import Type
 
+from dateutil import parser as date_parser
 from browser_use.controller.service import Controller
+from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 
 from browser_use.agent.service import Agent
@@ -13,123 +17,52 @@ from browser_use.browser.context import BrowserContextWindowSize
 from pydantic import BaseModel
 
 """
-from https://github.com/browser-use/browser-use/blob/main/examples/use-cases/web_voyager_agent.py
+Use a browser to browse lodging sites, apply additional filters, and return structured results.
+started from https://github.com/browser-use/browser-use/blob/main/examples/use-cases/web_voyager_agent.py
 """
 
 OUTPUT_PATH = "logs"
+START_TS = datetime.now()
 
-TASK_BOOKING = """Navigate to https://booking.com/.
-Click the "Where are you going?" field.
-Type "oahu".
-Click "O'ahu" in the drop down.
-Use the date picker to select dates May 31 through June 8.
-Click the field containing a person icon and text like "3 adults 0 children 1 room".
-Set the Adults field value to 3, then click Done.
-Click "Search".
-Click "Show on map".
-Drag, scroll and zoom the map so that it excludes Honolulu and includes the east coast of Oahu, from Punaluu to Kailua.
-In the left sidebar, click the checkbox next to Parking.
-Repeat the "get details" task for each big blue link in the middle column.
-Use the scrollbar on the right side of the middle column to display more results.
-Stop after repeating the "get details" task 5 times. 
-
-"get details" task:
-
-Save the big blue link text as the output key "title".
-Save the text to the right of the photo below the blue link text as the output key "card".
-Save the text formatted as currency starting with $ as the output key "price". Ignore any text in red or formatted with strikethrough.
-Click the big blue link.
-Click the largest image, wait for the page to load, and take a screenshot.
-Save the screenshot with a unique name, and save the  filename in the output key "photos".
-Click the Close link in the top right of the modal dialog.
-Scroll down the page until Property highlights section is visible. 
-Save the screenshot with a unique name, and save the result save the filename in the output key "description".
-Scroll down until a table with bed icons and people icons is visible, and take a screenshot.
-Save the screenshot with a unique name, and save the result save the filename in the output key "beds".
-Get the number of "single" or "twin", "full", "queen" and "king" beds. Do not include "sofa" beds.
-Save the bed information in the output key "bed_count".
-Close the browser tab and return to the search results page.
-Use output to generate JSON in this format and save to results.json
-{
-  "title": "title",
-  "card": "card",
-  "price": "price",
-  "photos": "photos_filename.png",
-  "description": "description",
-  "beds": "beds_filename.png",
-  "bed_count": {
-      "twin": 0,
-      "full": 1,
-      "queen": 1,
-      "king": 0
-}
- """
-
-TASK_AIRBNB = """
-Task: Find an Airbnb rental in Oahu for 3 adults with at least 2 bedrooms and at least 2 beds.
-
-If a popup, overlay, or modal appears, find and click a button or icon to dismiss it. Look for 'Close', 'X', 'Dismiss', or similar labels.
-
-1. Go to https://www.airbnb.com/
-2. Click on Search destinations.
-3. Type "{search}" in the search box.
-5. Click the "Add guests" button.
-6. Click the "+" button next to "Adults" three times until it shows 3.
-7. Click the "Search" button.
-8. Click the "Filters" button.
-9. Inside the open modal, scroll down until the "Bedrooms" section is visible.
-10. Click the "+" button next to "Bedrooms" twice until it shows 2.
-11. Click the "+" button next to "Beds" twice until it shows 2.
-12. Click the black button at the bottom that starts with "Show" to apply the filters.
-13. Print the URL of the page.
-14. For each listing block, get the following details. Scroll the page to load more listings if needed.
-  - If the bold text does not contain "in {results_in}", skip this listing and continue to the next one.
-  - Extract the bold text and save it to "title"
-  - Extract the rest of the text and save it to "description"
-  - Find an <a> tag that links to a room (href starts with "/rooms/") and extract the href attribute, and save  as "url".
-  - Find the first image inside the listing block and extract its src or srcset attribute and save it as "picture_url".
-  - Extract the price from text like "$1,234.00 for 5 nights" and save it to "price"
-  - Extract the number of beds and save it to "beds"
-  15. After reaching the end of the page, click the next link in the pagination numbers and repeat the previous step. If there are no pagination numbers or no more pages, stop.
-"""
-
-# annoyingly, Airbnb shows results that don't match the requested location
-# need to include only results that say "in {location}" in the title
-
-DETAILS = """
-Do these steps for each of the first 3 listings:
-1. Click on the image to open the listing.
-2. Switch to the new browser tab.
-3. Get the URL from the browser tab and save it to "url".
-4. Extract the listing title text and save it to "title".
-5. Extract the block of text after the bullet points and save it to "description".
-6. Scroll down until the red "Reserve" button is visible.
-7. Extract the price from text like $1234.00 for 5 nights and save it to "price".
-8. Extract the text from the "Where you'll sleep" section and save to "beds".
-9. Click the input field under the "Check-in" label.
-10. Click the left arrow icon next to the month header until both May 2025 and June 2025 are visible.
-11. Close the browser tab to return to the listing page.
-"""
+log = logging.getLogger("main")
 
 
 # https://github.com/browser-use/browser-use/blob/main/docs/customize/output-format.mdx
-class Listing(BaseModel):
+class BaseListing(BaseModel):
     title: str
     url: str
+    price: str
+    bed_count: int
+    bed_type: str
+
+
+class AirbnbListing(BaseListing):
     picture_url: str
     description: str
-    price: str
-    beds: str
 
 
-class Listings(BaseModel):
-    listings: list[Listing]
+class AirbnbListings(BaseModel):
+    listings: list[AirbnbListing]
+
+
+class BookingListing(BaseListing):
+    uncounted_bed_count: int
+    uncounted_bed_count_type: str
+
+
+class BookingListings(BaseModel):
+    listings: list[BookingListing]
 
 
 async def record_activity(agent_obj: Agent):
-    """Hook function that captures and records agent activity at each step"""
-    step = agent_obj.state.n_steps
-    print(f"--- step hook {step} ---")
+    """Save html and screenshot on each step.
+
+    https://github.com/browser-use/browser-use/blob/main/docs/customize/hooks.mdx
+    """
+    global START_TS
+    step = agent_obj.state.n_steps - 1
+    elapsed = round((datetime.now() - START_TS).total_seconds())
+    log.info(f"--- step hook {step} --- {elapsed}s\n")
     filename = f"step-{step:02}"
     website_html = await agent_obj.browser_context.get_page_html()
     # get the browser url
@@ -139,69 +72,142 @@ async def record_activity(agent_obj: Agent):
         )
         website_url = current_page.url
     except Exception as e:
-        print(f"error getting url: {e}")
+        log.error(f"error getting url: {e}")
         website_url = "unknown"
-    print(f"step {step} url: {website_url}")
+    log.info(f"step {step} url: {website_url}")
     with open(f"{OUTPUT_PATH}/{filename}.html", "w") as f:
         f.write(website_html)
+    await write_screenshot(agent_obj, f"step-{step:02}")
+
+
+async def write_screenshot(agent_obj: Agent, filename: str):
+    """Take a screenshot and write base64-encoded string to a PNG file."""
     # base64 encoded screenshot of the current page.
-    website_screenshot = await agent_obj.browser_context.take_screenshot()
-    write_screenshot(website_screenshot, f"step-{step:02}")
-
-
-# https://github.com/browser-use/browser-use/blob/main/docs/customize/hooks.mdx
-def write_screenshot(data: str, filename: str):
-    """Write base64-encoded string to a PNG file."""
+    data = await agent_obj.browser_context.take_screenshot()
     fn = f"{OUTPUT_PATH}/{filename}.png"
     with open(fn, "wb") as f:
         f.write(base64.b64decode(data))
-    print(f"wrote screenshot {fn}")
+    log.info(f"wrote screenshot {fn}")
 
 
-async def main(location: str):
+def setup_airbnb_task(location: str) -> tuple[str, Type[BaseModel]]:
+    """Load task steps from file and set up with start_url and city"""
     location_parts = location.split(", ")
     city = location_parts[0]
-    task = TASK_AIRBNB.format(search=location, results_in=city)
-    ts = datetime.now().strftime("%H%M")
-    # don't know how to get this into the hooks
+    url_location = "--".join(location_parts)
+    query_location = "%2C%20".join(location_parts)
+    start_url = (
+        f"https://www.airbnb.com/s/{url_location}/homes?"
+        "refinement_paths%5B%5D=%2Fhomes&flexible_trip_lengths%5B%5D=one_week&"
+        "price_filter_input_type=2&channel=EXPLORE&"
+        "date_picker_type=calendar&adults=3&"
+        f"source=structured_search_input_header&search_type=filter_change&query={query_location}&"
+        "search_mode=regular_search&price_filter_num_nights=7&"
+    )
+    with open("airbnb_listing.txt") as f:
+        task_text = f.read()
+    task = task_text.format(start_url=start_url, results_in=city)
+    return task, AirbnbListings
+
+
+def setup_booking_task(
+    location: str, start_date: date, end_date: date
+) -> tuple[str, Type[BaseModel]]:
+    with open("booking.txt") as f:
+        task_text = f.read()
+    # date format Sat Jul 26 - Sun Jul 27
+    date_range = f"{start_date.strftime('%a %b %d')} - {end_date.strftime('%a %b %d')}"
+    start_month = start_date.strftime("%B %Y")
+    next_month = (start_date + relativedelta(months=1)).strftime("%B %Y")
+    task = task_text.format(
+        location=location,
+        start_month=start_month,
+        next_month=next_month,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return task, BookingListings
+
+
+def setup_logs():
+    ts = datetime.now().strftime("%m%d-%H%M")
+    # don't know how else to get this into the hooks
     global OUTPUT_PATH
-    # create logs-ts directory if it doesn't exist
-    try:
-        os.makedirs(OUTPUT_PATH)
-    except FileExistsError:
-        pass
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
     log_path = f"{OUTPUT_PATH}/log-{ts}"
+    log_file = os.path.join(log_path, "agent.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)  # Ensure the directory exists
     OUTPUT_PATH = log_path
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s\t%(message)s", datefmt="%H:%M:%S"
+    )
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+
+    # https://github.com/browser-use/browser-use/issues/999
+    # browser_use disables log propagation so root logging config doesn't work
+    logging.getLogger("browser_use").addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    log.addHandler(console_handler)
+    log.setLevel(logging.INFO)
     print(f"Logging to {OUTPUT_PATH}")
-    # OpenAI's GPT-4o models are recommended for best performance.
-    llm = ChatOpenAI(model="gpt-4o")
+
+
+def setup_task(
+    location: str, site: str, from_dt: date, to_dt: date
+) -> tuple[str, Type[BaseModel]]:
+    task = output_model = None
+    if site == "airbnb":
+        task, output_model = setup_airbnb_task(location)
+    elif site == "booking":
+        task, output_model = setup_booking_task(location, from_dt, to_dt)
+    return task, output_model
+
+
+def setup_dates(from_str: str, to_str: str) -> tuple[date, date]:
+    """Parse dates from strings and return as date objects."""
+    if from_str:
+        from_date = date_parser.parse(from_str).date()
+    else:
+        from_date = date.today() + timedelta(days=42)
+    if to_str:
+        to_date = date_parser.parse(to_str).date()
+    else:
+        to_date = from_date + timedelta(days=4)
+    return from_date, to_date
+
+
+async def main(location: str, site: str, from_str: str, to_str: str):
+    from_dt, to_dt = setup_dates(from_str, to_str)
+    task, output_model = setup_task(location, site, from_dt, to_dt)
+
     # https://github.com/browser-use/browser-use/blob/main/browser_use/browser/browser.py
-    # hardcodes window-size to screen size
-    # offset from get_window_adjustments()
-    # non-Chrome: self.config.browser_class firefox, webkit
-    # uses self.config.extra_browser_args,
     browser = Browser(
         config=BrowserConfig(
             headless=False,
             disable_security=True,
             new_context_config=BrowserContextConfig(
-                disable_security=True,
-                minimum_wait_page_load_time=1,  # 3 on prod
-                maximum_wait_page_load_time=10,  # 20 on prod
-                # no_viewport=True,
+                minimum_wait_page_load_time=2,
+                maximum_wait_page_load_time=10,
+                clear_cookies=True,
+                save_recording_path=f"{OUTPUT_PATH}/recordings",
+                # this doesn't seem to do anything: window-size is hardcoded to screen size
                 browser_window_size=BrowserContextWindowSize(width=992, height=800),
                 trace_path=f"{OUTPUT_PATH}/trace",
             ),
         )
     )
-    controller = Controller(output_model=Listings)
+    controller = Controller(output_model=output_model)
     agent = Agent(
         task=task,
-        llm=llm,
-        browser=browser,  #  euse this browser instance and automatically create new contexts for each run()
+        # OpenAI's GPT-4o models are recommended for best performance.
+        llm=ChatOpenAI(model="gpt-4o"),
+        browser=browser,  #  reuse this browser instance and automatically create new contexts for each run()
         controller=controller,
-        # validate_output=True,
-        # enable_memory=False,
         save_conversation_path=f"{OUTPUT_PATH}/conversation",  # Save chat logs
         # extend_system_message: Add additional instructions to the default system prompt.
     )
@@ -211,7 +217,7 @@ async def main(location: str):
     )
     result = history.final_result()
     if result:
-        parsed: Listings = Listings.model_validate_json(result)
+        parsed = output_model.model_validate_json(result)
         with open(f"{OUTPUT_PATH}/results.json", "w") as f:
             f.write(parsed.model_dump_json(indent=2))
         for listing in parsed.listings:
@@ -228,8 +234,13 @@ history.model_actions()     # All actions with their parameters
 
 
 if __name__ == "__main__":
+    setup_logs()
     parser = argparse.ArgumentParser()
-    # Hauula, Oahu, HI
+    # "Hauula, Oahu, HI" airbnb
+    # "Northeastern University, Boston, MA" booking --from_date 2025-07-26 --to_date 2025-07-27
     parser.add_argument("location", type=str, help="location to search")
+    parser.add_argument("site", type=str, choices=["airbnb", "booking"])
+    parser.add_argument("--from_date", type=str, help="start date ")
+    parser.add_argument("--to_date", type=str, help="end date")
     args = parser.parse_args()
-    asyncio.run(main(args.location))
+    asyncio.run(main(args.location, args.site, args.from_date, args.to_date))
