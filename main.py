@@ -26,32 +26,9 @@ START_TS = datetime.now()
 
 log = logging.getLogger("main")
 
-
-# https://github.com/browser-use/browser-use/blob/main/docs/customize/output-format.mdx
-class BaseListing(BaseModel):
-    title: str
-    url: str
-    price: str
-    bed_count: int
-    bed_type: str
-
-
-class AirbnbListing(BaseListing):
-    picture_url: str
-    description: str
-
-
-class AirbnbListings(BaseModel):
-    listings: list[AirbnbListing]
-
-
-class BookingListing(BaseListing):
-    uncounted_bed_count: int
-    uncounted_bed_count_type: str
-
-
-class BookingListings(BaseModel):
-    listings: list[BookingListing]
+"""
+Hook for capturing additional information on each step: url, html, screenshots.
+"""
 
 
 async def record_activity(agent_obj: Agent):
@@ -90,7 +67,32 @@ async def write_screenshot(agent_obj: Agent, filename: str):
     log.info(f"wrote screenshot {fn}")
 
 
-def setup_airbnb_task(location: str) -> tuple[str, Type[BaseModel]]:
+"""
+Pydantic models for output.
+
+https://github.com/browser-use/browser-use/blob/main/docs/customize/output-format.mdx
+"""
+
+
+# BROWNBAG 4
+class BaseListing(BaseModel):
+    title: str
+    url: str
+    price: str
+    bed_count: int
+    bed_type: str
+
+
+class AirbnbListing(BaseListing):
+    picture_url: str
+    description: str
+
+
+class AirbnbListings(BaseModel):
+    listings: list[AirbnbListing]
+
+
+def setup_airbnb_task(location: str, script: str) -> tuple[str, Type[BaseModel]]:
     """Load task steps from file and set up with start_url and city"""
     location_parts = location.split(", ")
     city = location_parts[0]
@@ -104,16 +106,25 @@ def setup_airbnb_task(location: str) -> tuple[str, Type[BaseModel]]:
         f"source=structured_search_input_header&search_type=filter_change&query={query_location}&"
         "search_mode=regular_search&price_filter_num_nights=7&"
     )
-    with open("airbnb_listing.txt") as f:
+    with open(script or "airbnb_listing.txt") as f:
         task_text = f.read()
     task = task_text.format(start_url=start_url, results_in=city)
     return task, AirbnbListings
 
 
+class BookingListing(BaseListing):
+    uncounted_bed_count: int
+    uncounted_bed_count_type: str
+
+
+class BookingListings(BaseModel):
+    listings: list[BookingListing]
+
+
 def setup_booking_task(
-    location: str, start_date: date, end_date: date
+    location: str, start_date: date, end_date: date, script: str
 ) -> tuple[str, Type[BaseModel]]:
-    with open("booking.txt") as f:
+    with open(script or "booking.txt") as f:
         task_text = f.read()
     # date format Sat Jul 26 - Sun Jul 27
     start_month = start_date.strftime("%B %Y")
@@ -131,6 +142,7 @@ def setup_booking_task(
 
 
 def setup_logs():
+    """Write logs from this script and browser-use to a directory with a timestamp."""
     ts = datetime.now().strftime("%m%d-%H%M")
     # don't know how else to get this into the hooks
     global OUTPUT_PATH
@@ -159,13 +171,16 @@ def setup_logs():
 
 
 def setup_task(
-    location: str, site: str, from_dt: date, to_dt: date
+    location: str, site: str, from_dt: date, to_dt: date, script: str = None
 ) -> tuple[str, Type[BaseModel]]:
+
     task = output_model = None
     if site == "airbnb":
-        task, output_model = setup_airbnb_task(location)
+        task, output_model = setup_airbnb_task(location, script)
     elif site == "booking":
-        task, output_model = setup_booking_task(location, from_dt, to_dt)
+        task, output_model = setup_booking_task(location, from_dt, to_dt, script)
+    with open(f"{OUTPUT_PATH}/task.txt", "w") as f:
+        f.write(task)
     return task, output_model
 
 
@@ -182,12 +197,13 @@ def setup_dates(from_str: str, to_str: str) -> tuple[date, date]:
     return from_date, to_date
 
 
-async def main(location: str, site: str, from_str: str, to_str: str):
-    from_dt, to_dt = setup_dates(from_str, to_str)
-    task, output_model = setup_task(location, site, from_dt, to_dt)
+def new_browser() -> Browser:
+    """Open a new browser.
 
-    # https://github.com/browser-use/browser-use/blob/main/browser_use/browser/browser.py
-    browser = Browser(
+    https://github.com/browser-use/browser-use/blob/main/browser_use/browser/browser.py
+    """
+    log.info("opening a new browser")
+    return Browser(
         config=BrowserConfig(
             headless=False,
             disable_security=True,
@@ -202,6 +218,42 @@ async def main(location: str, site: str, from_str: str, to_str: str):
             ),
         )
     )
+
+
+def existing_browser() -> Browser:
+    """Connect to an existing open browser.
+
+    https://github.com/browser-use/browser-use/blob/250032c7dfd2ae5f28ebea800fea909b46c00a53/docs/customize/real-browser.mdx#L2
+    start Chrome with
+    """
+    # /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug-profile &
+    log.info("opening an existing browser")
+    return Browser(
+        config=BrowserConfig(
+            browser_binary_path="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",  # macOS path (Adjust if needed)
+            connect_config={
+                "ws_endpoint": "ws://localhost:9222"  # Point to the remote debugging port
+            },
+            new_context_config=BrowserContextConfig(
+                minimum_wait_page_load_time=2,
+                maximum_wait_page_load_time=10,
+                save_recording_path=f"{OUTPUT_PATH}/recordings",
+                trace_path=f"{OUTPUT_PATH}/trace",
+            ),
+        ),
+    )
+
+
+async def main(
+    location: str, site: str, from_str: str, to_str: str, script: str = None
+):
+    from_dt, to_dt = setup_dates(from_str, to_str)
+    task, output_model = setup_task(location, site, from_dt, to_dt, script)
+    if site == "sce":
+        browser = existing_browser()
+    else:
+        browser = new_browser()
+    log.info(f"loading data from {site} with model {output_model}")
     controller = Controller(output_model=output_model)
     agent = Agent(
         task=task,
@@ -223,6 +275,7 @@ async def main(location: str, site: str, from_str: str, to_str: str):
             f.write(parsed.model_dump_json(indent=2))
         for listing in parsed.listings:
             print(listing)
+        log.info(f"{len(parsed.listings)} results")
     """
 history.urls()              # List of visited URLs
 history.screenshots()       # List of screenshot paths
@@ -243,5 +296,8 @@ if __name__ == "__main__":
     parser.add_argument("site", type=str, choices=["airbnb", "booking"])
     parser.add_argument("--from_date", type=str, help="start date ")
     parser.add_argument("--to_date", type=str, help="end date")
+    parser.add_argument("--script", type=str, help="script to run")
     args = parser.parse_args()
-    asyncio.run(main(args.location, args.site, args.from_date, args.to_date))
+    asyncio.run(
+        main(args.location, args.site, args.from_date, args.to_date, args.script)
+    )
